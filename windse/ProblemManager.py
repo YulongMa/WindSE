@@ -76,60 +76,6 @@ class GenericProblem(object):
             cl = np.ones(self.num_blade_segments)
             cd = np.ones(self.num_blade_segments)
 
-<<<<<<< Updated upstream
-=======
-            # Initialize the lift and drag files
-            for fn in ['lift', 'drag']:
-                fp = open('./output/%s/nodal_%s.csv' % (self.params.name, fn), 'w')
-                fp.write('sim_time, theta, ')
-
-                for j in range(self.num_blade_segments):
-                    if j < self.num_blade_segments-1:
-                        fp.write('%s_%02d, ' % (fn, j))
-                    else:
-                        fp.write('%s_%02d\n' % (fn, j))
-                fp.close()
-
-            turb_data = self.params["wind_farm"]["read_turb_data"]
-
-            if turb_data:
-                self.fprint('Setting chord, lift, and drag from file \'%s\'' % (turb_data))
-
-                actual_turbine_data = np.genfromtxt(turb_data, delimiter = ',', skip_header = 1)
-
-                actual_x = actual_turbine_data[:, 0]
-                actual_chord = actual_turbine_data[:, 1]
-                actual_cl = actual_turbine_data[:, 3]
-                actual_cd = actual_turbine_data[:, 4]
-
-                # if self.params.name == 'iea_rwt_10rpm_mod_chord':
-                #     chord_shift_amt = np.linspace(0.7, 1.3, np.size(actual_chord))
-                #     actual_chord = chord_shift_amt*actual_chord
-
-                # print('chord measured: ', actual_chord)
-                # print('lift measured: ', actual_cl)
-                # print('drag measured: ', actual_cd)
-
-                # Create interpolators for chord, lift, and drag
-                chord_interp = interp.interp1d(actual_x, actual_chord)
-                cl_interp = interp.interp1d(actual_x, actual_cl)
-                cd_interp = interp.interp1d(actual_x, actual_cd)
-
-                # Construct the points at which to generate interpolated values
-                interp_points = np.linspace(0.0, 1.0, self.num_blade_segments)
-
-                # Generate the interpolated values
-                chord = chord_interp(interp_points)
-                cl = cl_interp(interp_points)
-                cd = cd_interp(interp_points)
-
-            else:
-                # If not reading from a file, prescribe dummy values
-                chord = self.farm.radius[0]/20.0*np.ones(self.num_blade_segments)
-                cl = np.ones(self.num_blade_segments)
-                cd = 0.1*np.ones(self.num_blade_segments)
-
-            # Save the list of controls to self
             for k in range(self.num_blade_segments):
                 self.mcl.append(Constant(cl[k]))
                 self.mcd.append(Constant(cd[k]))
