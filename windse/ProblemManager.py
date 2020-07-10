@@ -70,7 +70,13 @@ class GenericProblem(object):
 
         elif self.farm.turbine_method == 'alm':
             self.rpm = self.params["wind_farm"]["rpm"]
-            self.num_blade_segments = 10
+            # self.num_blade_segments = 10
+
+            hmin = self.dom.mesh.hmin()/np.sqrt(3)
+            # self.num_blade_segments = int(10.0*self.farm.radius[0]/hmin)
+            self.num_blade_segments = int(self.farm.radius[0]/hmin)
+            # print('Num blade segments: ', self.num_blade_segments)
+
             self.mchord = []
             self.mcl = []
             self.mcd = []
@@ -92,6 +98,8 @@ class GenericProblem(object):
 
             turb_data = self.params["wind_farm"]["read_turb_data"]
 
+            script_iterator = int(self.params["problem"]["script_iterator"])
+
             if turb_data:
                 self.fprint('Setting chord, lift, and drag from file \'%s\'' % (turb_data))
 
@@ -102,18 +110,32 @@ class GenericProblem(object):
                 actual_cl = actual_turbine_data[:, 3]
                 actual_cd = actual_turbine_data[:, 4]
 
-                modify_chord = False
+                x_vals = np.linspace(0.0, 1.0, np.size(actual_chord))
+                
+                # # Simple shifting
+                # max_shift = 0.3
+                # shift_amt = max_shift*x_vals**2
 
-                if modify_chord:
-                    shift_amt = 0.25
-                    low_end = 1.0 - shift_amt
-                    high_end = 1.0 + shift_amt
-                    chord_shift_amt = np.linspace(low_end, high_end, np.size(actual_chord))
-                    actual_chord = chord_shift_amt*actual_chord
+                # Sigmoidal shifting
+                sharpness = 10.0
+                center = 0.5
+                max_shift = 0.4
+            
+                sig = np.exp(sharpness*(x_vals-center))/(np.exp(sharpness*(x_vals-center)) + 1.0)
+                sig = sig - np.amin(sig)
+                shift_amt = max_shift*sig/np.amax(sig)
 
-                # print('chord measured: ', actual_chord)
-                # print('lift measured: ', actual_cl)
-                # print('drag measured: ', actual_cd)
+                if script_iterator == 1:
+                    # Shift tip elements DOWN by max_shift percent
+                    actual_chord = (1.0 - shift_amt)*actual_chord
+
+                elif script_iterator == 2:
+                    # Shift tip elements UP by max_shift percent
+                    actual_chord = (1.0 + shift_amt)*actual_chord
+
+                print('chord measured: ', actual_chord)
+                print('lift measured: ', actual_cl)
+                print('drag measured: ', actual_cd)
 
                 # Create interpolators for chord, lift, and drag
                 chord_interp = interp.interp1d(actual_x, actual_chord)
@@ -135,12 +157,32 @@ class GenericProblem(object):
                 cd = 0.1*np.ones(self.num_blade_segments)
 
             # Save the list of controls to self
+
+
             for k in range(self.num_blade_segments):
+                # if script_iterator >= 0 and script_iterator == k:
+                #     print('Adding perturbation to chord #%d' % (script_iterator))
+                #     perturbation = 1.0
+                #     self.mchord.append(Constant(chord[k] + perturbation))
+                # else:
+
                 self.mchord.append(Constant(chord[k]))
                 self.mcl.append(Constant(cl[k]))
                 self.mcd.append(Constant(cd[k]))
 
-            tf = CalculateActuatorLineTurbineForces(self, simTime)
+            remove_for_debugging = False
+            
+            if remove_for_debugging:
+                tf = Function(self.fs.V)
+                tf.vector()[:] = 0.0
+            else:
+                tf = CalculateActuatorLineTurbineForces(self, simTime)
+
+                print()
+                print('Gaussian Width: %f' % (self.gaussian_width))
+                print('Num Actuator Nodes: %d' % (self.num_blade_segments))
+                print()
+
         else:
             raise ValueError("Unknown turbine method: "+self.farm.turbine_method)
         
@@ -402,7 +444,7 @@ class UnsteadyProblem(GenericProblem):
         # Define time step size (this value is used only for step 1 if adaptive timestepping is used)
         # FIXME: change variable name to avoid confusion within dolfin adjoint
         self.dt = 0.1*self.dom.mesh.hmin()/self.bd.HH_vel
-        # self.dt = 0.04
+        self.dt = 0.04
         self.dt_c  = Constant(self.dt)
 
         self.fprint("Viscosity: {:1.2e}".format(float(self.viscosity)))
@@ -422,6 +464,7 @@ class UnsteadyProblem(GenericProblem):
         # >> _k2 = double previous (step k-2)
         self.u_k = Function(self.fs.V)
         self.u_k1 = Function(self.fs.V)
+        # self.u_k1.set_allow_extrapolation(True)
         self.u_k2 = Function(self.fs.V)
 
         # Seed previous velocity fields with the chosen initial condition

@@ -350,11 +350,88 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
             fp << (dolfin_function, k)
 
 
+    def merge_interpolated(global_interp, data_in, ni):
+
+        for k in range(ni):
+            if not np.isnan(data_in[0, k]):
+                global_interp[:, k] = data_in[:, k]
+
+        return global_interp
+
+
+    def build_parallel_u_fluid(blade_pos, problem, using_local_velocity, comm, rank, num_procs):
+
+        ni = np.shape(blade_pos)[1]
+
+        # An empty array to store the fluid velocities at each actuator node
+        interp_values = np.empty((3, ni))
+
+        for k in range(ni):
+
+            if using_local_velocity:
+                xi = blade_pos[0, k]
+            else:
+                xi = problem.dom.x_range[0]
+
+            yi = blade_pos[1, k]
+            zi = blade_pos[2, k]
+
+            # Try to access the fluid velocity at this actuator point
+            # If this rank doesn't own that point, an error will occur,
+            # in which case NaN should be reported
+            try:
+                fn_val = problem.u_k1(xi, yi, zi)
+            except:
+                fn_val = [np.nan, np.nan, np.nan]
+
+            # Store the interpolated value (even if NaN)
+            interp_values[:, k] = fn_val
+
+        print('rank %d found:\n' % (rank), interp_values)
+
+        if num_procs > 1:
+            # Initialize empty array to hold everything
+            global_interp = np.zeros((3, ni))
+
+            if rank == 0:
+                for k in range(num_procs):
+                    if k == 0:
+                        # Add fluid velocities owned by rank zero
+                        global_interp = merge_interpolated(global_interp, interp_values, ni)
+
+                    else:
+                        # Receive values from rank k
+                        data_in = np.zeros((3, ni), dtype = float)
+                        comm.Recv(data_in, source = k)
+
+                        # Add fluid velocities owned by rank k
+                        global_interp = merge_interpolated(global_interp, data_in, ni)
+
+            else:
+                # Send interpolated values (even if NaN) to root
+                data_out = np.copy(interp_values)
+                comm.Send(data_out, dest = 0)
+
+            # Distribute the finished global array to all ranks from zero
+            comm.Bcast(global_interp, root=0)
+        else:
+            global_interp = np.copy(interp_values)
+
+
+        return global_interp
+
+
     #================================================================
     # Get Mesh Properties
     #================================================================
 
     ndim = problem.dom.dim
+
+    # Get MPI details
+    mpi_info = problem.farm.dom.mpi_info
+    comm = mpi_info[0]
+    rank = mpi_info[1]
+    num_procs = mpi_info[2]
 
     # Get the coordinates of the vector function space
     coords = problem.fs.V.tabulate_dof_coordinates()
@@ -387,6 +464,8 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
     # Note: this sets the gaussian width to roughly twice the minimum cell length scale
     eps = 2.0*problem.dom.mesh.hmin()/np.sqrt(3)
 
+    problem.gaussian_width = eps
+
     #================================================================
     # Set Derived Constants
     #================================================================
@@ -395,7 +474,11 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
     rdim = np.linspace(0.0, L, problem.num_blade_segments)
 
     # Calculate width of an individual blade segment
-    w = rdim[1] - rdim[0]
+    # w = rdim[1] - rdim[0] # This is equivalent to L/(N-1) which is too large
+    # w = L/problem.num_blade_segments
+    w = (rdim[1] - rdim[0])*np.ones(problem.num_blade_segments)
+    w[0] = w[0]/2.0
+    w[-1] = w[-1]/2.0
 
     # Calculate an array describing the x, y, z position of each actuator node
     # Note: The basic blade is oriented along the +y-axis
@@ -492,26 +575,36 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
         u_fluid = np.zeros((3, problem.num_blade_segments))
 
         # Set if using local velocity around inidividual nodes
-        using_local_velocity = False
+        using_local_velocity = True
 
-        if using_local_velocity:
-            # Generate the fluid velocity from the actual node locations in the flow
-            for k in range(problem.num_blade_segments):
-                u_fluid[:, k] = problem.u_k1(blade_pos[0, k],
-                                             blade_pos[1, k],
-                                             blade_pos[2, k])
+        u_fluid = build_parallel_u_fluid(blade_pos, problem, using_local_velocity, comm, rank, num_procs)
+        print('global on rank %d \n' % (rank), u_fluid)
+
+
+        # DEPRECATED BY BUILD_PARALLEL_U_FLUID
+        # if using_local_velocity:
+
+        #     # comm.Barrier()
+
+
+        #     # Generate the fluid velocity from the actual node locations in the flow
+        #     # for k in range(problem.num_blade_segments):
+        #     #     u_fluid[:, k] = problem.u_k1(blade_pos[0, k],
+        #     #                                  blade_pos[1, k],
+        #     #                                  blade_pos[2, k])
                                 
-        else:
-            # Generate the fluid velocity using the inlet velocity (x-pos = x_range[0])        
-            for k in range(problem.num_blade_segments):
-                u_fluid[:, k] = problem.u_k1(problem.dom.x_range[0],
-                                             blade_pos[1, k],
-                                             blade_pos[2, k])
+        # else:
+        #     # Generate the fluid velocity using the inlet velocity (x-pos = x_range[0])        
+        #     for k in range(problem.num_blade_segments):
+        #         u_fluid[:, k] = problem.u_k1(problem.dom.x_range[0],
+        #                                      blade_pos[1, k],
+        #                                      blade_pos[2, k])
                 
-                # Force inlet velocity (1, 0, 0) for debugging
-                # u_fluid[:, k] = np.array([1, 0, 0])
+        #         # Force inlet velocity (1, 0, 0) for debugging
+        #         # u_fluid[:, k] = np.array([1, 0, 0])
 
         
+
         # Rotate the blade velocity in the global x, y, z, coordinate system
         # Note: blade_vel_base is negative since we seek the velocity of the fluid relative to a stationary blade
         # and blade_vel_base is defined based on the movement of the blade
@@ -551,7 +644,10 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
         # Calculate the force magnitude at every mesh point due to every node [numGridPts x NumActuators]
         nodal_lift = lift*np.exp(-dist2/eps**2)/(eps**3 * np.pi**1.5)
         nodal_drag = drag*np.exp(-dist2/eps**2)/(eps**3 * np.pi**1.5)
-            
+
+        print(rank, nodal_lift.max())
+        print(rank, nodal_drag.max())
+
         for k in range(problem.num_blade_segments):
             # The drag unit simply points opposite the relative velocity unit vector
             drag_unit_vec = -np.copy(u_unit_vec[:, k])
@@ -641,6 +737,12 @@ def UpdateActuatorLineForce(problem, simTime, dfd):
 
         problem.num_times_called += 1
         fp.close()
+
+        mpi_rank_file = File('./output/%s/timeSeries/mpi_index.pvd' % (problem.params.name))
+        mpi_rank = Function(problem.fs.Q)
+        mpi_rank.vector()[:] = rank
+        mpi_rank.rename('mpi_rank', 'mpi_rank')
+        mpi_rank_file << mpi_rank
 
 
     if dfd == None:

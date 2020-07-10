@@ -4,6 +4,7 @@ import os.path as osp
 import argparse
 import sys
 import windse
+from dolfin import *
 
 def DefaultParameters():
     """
@@ -62,7 +63,7 @@ def Initialize(params_loc=None):
 
     return params
 
-def BuildDomain(params):
+def BuildDomain(mpi_info, params):
     """
     This function build the domain and wind farm objects.
 
@@ -79,7 +80,11 @@ def BuildDomain(params):
         the wind farm object that contains the turbine information.
     """
 
+    comm = mpi_info[0]
+    rank = mpi_info[1]
+    num_procs = mpi_info[2]
     ### Build Domain ###
+
     if params["domain"]["interpolated"]:
         dom_dict = {"box":windse.InterpolatedBoxDomain,
                     "cylinder":windse.InterpolatedCylinderDomain
@@ -90,7 +95,16 @@ def BuildDomain(params):
                     "cylinder":windse.CylinderDomain,
                     "circle":windse.CircleDomain,
                     "imported":windse.ImportedDomain}
+    # if rank == 0:
     dom = dom_dict[params["domain"]["type"]]()
+    # else:
+        # dom = dom_dict[params["domain"]["type"]]()
+        # pass
+
+    # dom = Mesh('serial_gen_mesh.xml')
+
+    dom.mpi_info = mpi_info
+
 
 
     #### Build Farm
@@ -101,8 +115,11 @@ def BuildDomain(params):
     farm.Plot(params["wind_farm"]["display"])
 
     ### warp and refine the mesh
-    windse.WarpMesh(dom)
-    windse.RefineMesh(dom,farm)
+    # FIXME: This should be working with multiple cores, but it currently doesn't
+    # FIXME: OR, generate the mesh on a single core, read it in with multiple cores
+    # if num_procs == 1:
+    #     windse.WarpMesh(dom)
+    #     windse.RefineMesh(dom,farm)
 
     ### Finalize the Domain ###
     dom.Finalize()
@@ -170,7 +187,7 @@ def BuildSolver(params,problem):
 
     return solver
 
-def SetupSimulation(params_loc=None):
+def SetupSimulation(mpi_info, params_loc=None):
     """
     This function automatically sets up the entire simulation. Solve with solver.Solve()
 
@@ -189,7 +206,7 @@ def SetupSimulation(params_loc=None):
             contains the solver routines. Solve with solver.Solve()
     """
     params = Initialize(params_loc)
-    dom, farm = BuildDomain(params)
+    dom, farm = BuildDomain(mpi_info, params)
     problem = BuildProblem(params,dom,farm)
     solver = BuildSolver(params,problem)
 

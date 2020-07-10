@@ -50,31 +50,14 @@ def CalculatePowerFunctional(solver,inflow_angle = 0.0):
     return J
 
 def CalculateActuatorLinePowerFunctional(solver,inflow_angle = 0.0):
-    J = assemble(dot(solver.problem.tf,solver.problem.u_k)*dx)
 
-    if solver.save_power:
-        J_list=np.zeros(solver.problem.farm.numturbs+1)
-        if solver.problem.farm.actuator_disks_list is not None:
-            for i in range(solver.problem.farm.numturbs):
-                yaw = solver.problem.farm.myaw[i]+inflow_angle
-                tf1 = solver.problem.farm.actuator_disks_list[i] * cos(yaw)**2
-                tf2 = solver.problem.farm.actuator_disks_list[i] * sin(yaw)**2
-                tf3 = solver.problem.farm.actuator_disks_list[i] * 2.0 * cos(yaw) * sin(yaw)
-                tf = tf1*solver.u_k[0]**2+tf2*solver.u_k[1]**2+tf3*solver.u_k[0]*solver.u_k[1]
-                J_list[i] = assemble(dot(tf,solver.u_k)*dx,**solver.extra_kwarg)
-        J_list[-1]=sum(J_list)
+    # chord = solver.problem.mchord
+    J = Constant(solver.problem.alm_power)
 
-        folder_string = solver.params.folder+"/data/"
-        if not os.path.exists(folder_string): os.makedirs(folder_string)
-
-        if solver.J_saved:
-            f = open(folder_string+"power_data.txt",'ab')
-        else:
-            f = open(folder_string+"power_data.txt",'wb')
-            solver.J_saved = True
-
-        np.savetxt(f,[J_list])
-        f.close()
+    # FIXME: This needs to be recorded/annotated, but it doesn't work as written below
+    # J = solver.problem.alm_power
+    # J.assign(solver.problem.alm_power, annotate=True)
+    # J.assign(solver.problem.alm_power, annotate=True)
 
     return J
 

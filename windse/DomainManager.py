@@ -781,6 +781,9 @@ class BoxDomain(GenericDomain):
 
         self.fprint("Initial Domain Setup",special="footer")
 
+        # myfp = File('serial_gen_mesh.xml')
+        # myfp << self.mesh
+
     def ground_function(self,x,y,dx=0,dy=0):
         if dx == 0 and dy == 0:
             return self.ground_reference

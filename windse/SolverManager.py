@@ -428,24 +428,28 @@ class UnsteadySolver(GenericSolver):
 
         self.fprint("Assembling time-independent matrices")
 
+        # Testing other types of assembly options to fix parallel problem
+
+        A1, b1 = assemble_system(self.problem.a1, self.problem.L1)
+
         # Assemble left-hand side matrices
-        A1 = assemble(self.problem.a1)
-        A2 = assemble(self.problem.a2)
-        A3 = assemble(self.problem.a3)
+        # A1 = assemble(self.problem.a1, keep_diagonal=True)
+        # A2 = assemble(self.problem.a2)
+        # A3 = assemble(self.problem.a3)
 
 
         # Apply boundary conditions to matrices
         [bc.apply(A1) for bc in self.problem.bd.bcu]
-        [bc.apply(A2) for bc in self.problem.bd.bcp]
+        # [bc.apply(A2) for bc in self.problem.bd.bcp]
 
         # Assemble right-hand side vector
-        b1 = assemble(self.problem.L1)
-        b2 = assemble(self.problem.L2)
-        b3 = assemble(self.problem.L3)
+        # b1 = assemble(self.problem.L1, keep_diagonal=True)
+        # b2 = assemble(self.problem.L2)
+        # b3 = assemble(self.problem.L3)
 
         # Apply bounday conditions to vectors
         [bc.apply(b1) for bc in self.problem.bd.bcu]
-        [bc.apply(b2) for bc in self.problem.bd.bcp]
+        # [bc.apply(b2) for bc in self.problem.bd.bcp]
 
         # ================================================================
 
@@ -480,6 +484,9 @@ class UnsteadySolver(GenericSolver):
         tip_speed = self.problem.rpm*2.0*np.pi*self.problem.farm.radius[0]/60.0
 
         # self.problem.alm_power_sum = 0.0
+
+        init_average = True
+        average_start_time = 200.0
 
         while not stable and self.simTime < self.final_time:
             self.problem.bd.UpdateVelocity(self.simTime)
@@ -544,39 +551,61 @@ class UnsteadySolver(GenericSolver):
 
                 # self.problem.alm_power_average = self.problem.alm_power_sum/self.simTime
 
-                self.fprint('Average Power: %.3f MW' % (self.problem.alm_power/1e6))
+                if self.simTime > average_start_time:
+                    if init_average:
+                        average_vel = Function(self.problem.fs.V)
+                        average_vel.vector()[:] = self.problem.u_k1.vector()[:]*self.problem.dt
+
+                        average_power = self.problem.alm_power*self.problem.dt
+
+                        init_average = False
+                    else:
+                        average_vel.vector()[:] += self.problem.u_k1.vector()[:]*self.problem.dt
+
+                        average_power += self.problem.alm_power*self.problem.dt
+
+                self.fprint('Rotor Power: %.6f MW' % (self.problem.alm_power/1e6))
                 # exit()
 
             # Adjust the timestep size, dt, for a balance of simulation speed and stability
             save_next_timestep = self.AdjustTimestepSize(save_next_timestep, self.save_interval, self.simTime, u_max, u_max_k1)
 
             # Calculate the objective function
-            if self.optimizing and self.simTime >= self.record_time:
 
-                # Append the current time step for post production
+            if self.optimizing and self.simTime >= self.record_time:
                 self.adj_time_list.append(self.simTime)
 
-                # Calculate functional and compute running average
-                self.J += float(self.problem.dt)*self.objective_func(self,(iter_val-self.problem.dom.inflow_angle))
-                dt_sum += self.problem.dt 
-                J_new = float(self.J/dt_sum)
+                self.J = self.objective_func(self, (iter_val-self.problem.dom.inflow_angle))
 
-                # Check the change in J with respect to time and check if we are "stable" i.e. hit the required number of minimums
-                J_diff = J_new-J_old
-                if J_diff_old <= 0 and J_diff > 0 and self.min_total:
-                    if min_count == self.min_total:
-                        stable = True
-                    else:
-                        min_count += 1
-                J_diff_old = J_diff
-                J_old = J_new
+                # dt_sum += self.problem.dt
 
-                # Another stable checking method that just looks at the difference
-                # if abs(J_diff) <= 0.001:
-                #     stable = True
 
-                print("Current Objective Value: "+repr(float(self.J/dt_sum)))
-                print("Change in Objective    : "+repr(float(J_diff)))
+            # if self.optimizing and self.simTime >= self.record_time:
+
+            #     # Append the current time step for post production
+            #     self.adj_time_list.append(self.simTime)
+
+            #     # Calculate functional and compute running average
+            #     self.J += float(self.problem.dt)*self.objective_func(self,(iter_val-self.problem.dom.inflow_angle))
+            #     dt_sum += self.problem.dt 
+            #     J_new = float(self.J/dt_sum)
+
+            #     # Check the change in J with respect to time and check if we are "stable" i.e. hit the required number of minimums
+            #     J_diff = J_new-J_old
+            #     if J_diff_old <= 0 and J_diff > 0 and self.min_total:
+            #         if min_count == self.min_total:
+            #             stable = True
+            #         else:
+            #             min_count += 1
+            #     J_diff_old = J_diff
+            #     J_old = J_new
+
+            #     # Another stable checking method that just looks at the difference
+            #     # if abs(J_diff) <= 0.001:
+            #     #     stable = True
+
+            #     print("Current Objective Value: "+repr(float(self.J/dt_sum)))
+            #     print("Change in Objective    : "+repr(float(J_diff)))
 
             # After changing timestep size, A1 must be reassembled
             # FIXME: This may be unnecessary (or could be sped up by changing only the minimum amount necessary)
@@ -588,9 +617,21 @@ class UnsteadySolver(GenericSolver):
             i+=1
 
         if self.optimizing:
-            self.J = self.J/float(dt_sum)
+            pass
+            # self.J = self.J/float(dt_sum)
+            # self.J = Constant(self.J/float(dt_sum))
 
         stop = time.time()
+
+        if self.simTime > average_start_time:
+            average_vel.vector()[:] = average_vel.vector()[:]/(self.simTime-average_start_time)
+            fp = File('./output/%s/average_vel.pvd' % (self.params.name))
+            average_vel.rename('average_vel', 'average_vel')
+            fp << average_vel
+
+            average_power = average_power/(self.simTime-average_start_time)
+            self.fprint('AVERAGE Rotor Power: %.6f MW' % (average_power/1e6))
+
 
         self.fprint("Finished",special="footer")
         self.fprint("Solve Complete: {:1.2f} s".format(stop-start),special="footer")

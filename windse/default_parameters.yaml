@@ -106,6 +106,7 @@ problem:
     use_25d_model: False
     viscosity:     0.1
     lmax:          15
+    script_iterator: -1
 
 solver:
     type:              steady

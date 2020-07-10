@@ -64,7 +64,8 @@ def CreateRefinementList(dom, farm, refine_params):
 
             elif turbine_type == 'wake':
                 radius = max(farm.RD)
-                length = 5*radius
+                length = 5.0*radius
+                # length = 1.0*radius
                 theta = dom.inflow_angle
                 refine_list.append(["wake",[radius,length,theta,expand_factor]])
 

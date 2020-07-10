@@ -4,8 +4,19 @@ import os.path as osp
 import argparse
 import sys
 
+from dolfin import *
+
 # import os
 # os.environ['OMP_NUM_THREADS'] = '1'
+set_log_level(10)
+
+# from mpi4py import MPI as pympi
+# comm = pympi.COMM_WORLD
+comm = MPI.comm_world
+rank = comm.Get_rank()
+num_procs = comm.Get_size()
+
+mpi_info = [comm, rank, num_procs]
 
 
 ALL_ACTIONS = ("run")
@@ -38,7 +49,7 @@ def get_action():
     return sys.argv.pop(1)
 
 ### Run the driver ###
-def run_action(params_loc=None):
+def run_action(mpi_info, params_loc=None):
     tick = time.time()
 
     ### Clean up other module references ###
@@ -55,7 +66,7 @@ def run_action(params_loc=None):
     from .driver_functions import SetupSimulation
 
     ### Setup everything ###
-    params, problem, solver = SetupSimulation(params_loc)
+    params, problem, solver = SetupSimulation(mpi_info, params_loc)
 
     ### run the solver ###
     solver.Solve()
@@ -89,7 +100,7 @@ def test_demo(demo):
 
 def main():
     actions = {"run":  run_action}
-    actions[get_action()]()
+    actions[get_action()](mpi_info)
 
 if __name__ == "__main__":
     main()

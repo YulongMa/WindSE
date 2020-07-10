@@ -273,7 +273,7 @@ class Optimizer(object):
         self.SaveControls(m)
         self.ListControls(m)
 
-        self.problem.farm.Plot(filename="wind_farm_step_"+repr(self.iteration),power=-self.Jcurrent)
+        # self.problem.farm.Plot(filename="wind_farm_step_"+repr(self.iteration),power=-self.Jcurrent)
         
         self.iteration += 1
 
